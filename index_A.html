@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <title>STNL Viewer — Lemma A</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    h1 { margin-top: 0; }
+    .controls { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; }
+    .modes { grid-column: 1 / -1; display: flex; gap: 16px; font-size: 14px; color: #333; }
+    input[type="text"] { padding: 8px 10px; font-size: 16px; }
+    button { padding: 8px 12px; font-size: 14px; cursor: pointer; }
+    .result { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-top: 12px; }
+    .head { font-weight: 700; }
+    .pos { display: inline-block; margin-left: 8px; font-size: 12px; padding: 1px 6px; border: 1px solid #e5e5e5; border-radius: 999px; background: #f8f8f8; }
+    .content p { margin: 8px 0; }
+    .content { white-space: normal; } /* full-width sentences */
+    .note { color: #666; font-size: 12px; }
+    .related { margin-top: 16px; font-size: 14px; }
+    .chip { display: inline-block; margin: 4px 6px 0 0; padding: 4px 8px; border: 1px solid #ddd; border-radius: 999px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>STNL Viewer — Lemma's met A</h1>
+  <p class="note">Zoek exact op lemma. We tonen alleen het eigen betekenisblok. Zinnen lopen over de hele marge; na elke punt een spatie (weergave). Genummerde betekenissen worden als lijst onder elkaar gezet.</p>
+
+  <div class="controls">
+    <input id="q" type="text" placeholder="Lemma (bijv. abi, ai, aleisi)" />
+    <div>
+      <button id="btnSearch">Zoek</button>
+      <button id="btnClear">Wissen</button>
+    </div>
+    <div class="modes">
+      <label><input type="radio" name="mode" value="exact" checked> Lemma exact</label>
+      <label><input type="radio" name="mode" value="starts"> Lemma begint met</label>
+    </div>
+  </div>
+
+  <div id="out"></div>
+
+  <script>
+    let BLOCKS = [];
+
+    async function loadData() {
+      const res = await fetch('STNL_lemma_blocks_A.json');
+      if (!res.ok) throw new Error('Kan STNL_lemma_blocks_A.json niet laden');
+      BLOCKS = await res.json();
+    }
+
+    function normalizeSpacing(s) {
+      if (!s) return '';
+      // Collapse newlines to spaces (full-width sentences)
+      s = s.replace(/[\r\n]+/g, ' ');
+      // Ensure a space after periods if followed by a non-space
+      s = s.replace(/\.(\S)/g, '. $1');
+      // Collapse multiple spaces
+      s = s.replace(/\s{2,}/g, ' ');
+      return s.trim();
+    }
+
+    function splitSenses(text) {
+      const t = normalizeSpacing(text);
+      // Recognize numbered senses: 1) 2) 3)
+      const marked = t.replace(/(^|\s)(\d+)\)\s*/g, (m, pre, num) => `${pre}@@SENSE_${num}@@ `);
+      const parts = marked.split('@@').filter(x => x);
+      const senses = [];
+      for (let i=0; i<parts.length; i++) {
+        const part = parts[i];
+        if (part.startsWith('SENSE_')) {
+          const num = part.replace('SENSE_','').trim();
+          let content = '';
+          if (i+1 < parts.length) { content = parts[i+1]; i++; }
+          senses.push({num, text: content.trim()});
+        }
+      }
+      if (senses.length === 0 && t) return [{num: null, text: t}];
+      return senses;
+    }
+
+    function renderBlock(b) {
+      const container = document.createElement('div');
+      container.className = 'result';
+      const head = document.createElement('div');
+      head.className = 'head';
+      head.innerHTML = `${b.lemma} <span class="pos">${b.pos}</span>`;
+      const contentDiv = document.createElement('div');
+      contentDiv.className = 'content';
+      const senses = splitSenses(b.content || '');
+      if (senses.length > 1 || (senses.length === 1 && senses[0].num)) {
+        const ol = document.createElement('ol');
+        for (const s of senses) {
+          const li = document.createElement('li');
+          li.textContent = s.text;
+          ol.appendChild(li);
+        }
+        contentDiv.appendChild(ol);
+      } else {
+        const p = document.createElement('p');
+        p.textContent = senses[0] ? senses[0].text : '';
+        contentDiv.appendChild(p);
+      }
+      container.appendChild(head);
+      container.appendChild(contentDiv);
+      return container;
+    }
+
+    function search(lemma, mode) {
+      const L = (lemma || '').trim().toLowerCase();
+      if (!L) return [];
+      if (mode === 'exact') return BLOCKS.filter(b => (b.lemma || '').toLowerCase() === L);
+      return BLOCKS.filter(b => (b.lemma || '').toLowerCase().startsWith(L));
+    }
+
+    async function doSearch() {
+      const q = document.getElementById('q').value.trim();
+      const mode = (document.querySelector('input[name="mode"]:checked') || {}).value || 'exact';
+      const out = document.getElementById('out');
+      out.innerHTML = '';
+      if (!q) return;
+      if (BLOCKS.length === 0) await loadData();
+
+      const results = search(q, mode);
+      if (mode === 'exact' && results.length === 0) {
+        out.innerHTML = '<p>Geen exact lemma gevonden binnen letter A. Probeer "Begint met".</p>';
+        return;
+      }
+      if (results.length === 0) {
+        out.innerHTML = '<p>Geen resultaten.</p>';
+        return;
+      }
+      // Exact-first, then related
+      const exact = results.filter(b => b.lemma.toLowerCase() === q.toLowerCase());
+      const related = results.filter(b => b.lemma.toLowerCase() !== q.toLowerCase());
+
+      for (const b of exact) out.appendChild(renderBlock(b));
+      if (mode === 'starts' && related.length) {
+        for (const b of related.slice(0, 50)) out.appendChild(renderBlock(b));
+      }
+    }
+
+    document.getElementById('btnSearch').onclick = doSearch;
+    document.getElementById('btnClear').onclick = () => {
+      document.getElementById('q').value = '';
+      document.getElementById('out').innerHTML = '';
+      document.getElementById('q').focus();
+    };
+  </script>
+</body>
+</html>
